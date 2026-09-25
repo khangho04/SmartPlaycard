@@ -753,6 +753,8 @@ FirebaseCard getCardFromFirebase(
 // CREATE CARD
 // =====================================================
 
+#include "SmartTapAtomic.h"
+
 bool createFirebaseCard(
   const String &uid
 )
@@ -841,7 +843,8 @@ bool createFirebaseCard(
     Database.set<object_t>(
       firebaseClient,
       "/cards/" + uid,
-      object_t(json)
+      object_t(json),
+      "null_etag"
     );
 
 
@@ -850,265 +853,6 @@ bool createFirebaseCard(
     firebaseClient
       .lastError()
       .code() == 0;
-}
-
-
-// =====================================================
-// PLAY UPDATE
-// =====================================================
-
-bool updateCardAfterPlay(
-  const String &uid,
-  int newBalance
-)
-{
-  int count =
-    getOptionalInt(
-      "/cards/" +
-      uid +
-      "/playCount"
-    );
-
-
-  int spent =
-    getOptionalInt(
-      "/cards/" +
-      uid +
-      "/totalSpent"
-    );
-
-
-  String json = "{";
-
-
-  json +=
-    "\"balance\":" +
-    String(newBalance) +
-    ",";
-
-
-  json +=
-    "\"lastPlayedAt\":\"" +
-    getDateTime() +
-    "\",";
-
-
-  json +=
-    "\"lastPlayedAtEpoch\":" +
-    String(getEpoch()) +
-    ",";
-
-
-  json +=
-    "\"playCount\":" +
-    String(count + 1) +
-    ",";
-
-
-  json +=
-    "\"totalSpent\":" +
-    String(
-      spent +
-      GAME_PRICE
-    );
-
-
-  json += "}";
-
-
-  bool result =
-    Database.update<object_t>(
-      firebaseClient,
-      "/cards/" + uid,
-      object_t(json)
-    );
-
-
-  return
-    result &&
-    firebaseClient
-      .lastError()
-      .code() == 0;
-}
-
-
-// =====================================================
-// TOPUP UPDATE
-// =====================================================
-
-bool updateCardAfterTopup(
-  const String &uid,
-  int amount,
-  int newBalance
-)
-{
-  int count =
-    getOptionalInt(
-      "/cards/" +
-      uid +
-      "/topupCount"
-    );
-
-
-  int total =
-    getOptionalInt(
-      "/cards/" +
-      uid +
-      "/totalTopup"
-    );
-
-
-  String json = "{";
-
-
-  json +=
-    "\"balance\":" +
-    String(newBalance) +
-    ",";
-
-
-  json +=
-    "\"lastTopupAt\":\"" +
-    getDateTime() +
-    "\",";
-
-
-  json +=
-    "\"lastTopupAtEpoch\":" +
-    String(getEpoch()) +
-    ",";
-
-
-  json +=
-    "\"topupCount\":" +
-    String(count + 1) +
-    ",";
-
-
-  json +=
-    "\"totalTopup\":" +
-    String(
-      total +
-      amount
-    );
-
-
-  json += "}";
-
-
-  bool result =
-    Database.update<object_t>(
-      firebaseClient,
-      "/cards/" + uid,
-      object_t(json)
-    );
-
-
-  return
-    result &&
-    firebaseClient
-      .lastError()
-      .code() == 0;
-}
-
-
-// =====================================================
-// TRANSACTION
-// =====================================================
-
-void logTransaction(
-  const String &type,
-  const String &uid,
-  const String &cardName,
-  int amount,
-  int before,
-  int after
-)
-{
-  if (
-    !firebaseReady()
-  )
-  {
-    return;
-  }
-
-
-  String json = "{";
-
-
-  json +=
-    "\"type\":\"" +
-    type +
-    "\",";
-
-
-  json +=
-    "\"uid\":\"" +
-    uid +
-    "\",";
-
-
-  json +=
-    "\"cardName\":\"" +
-    jsonEscape(cardName) +
-    "\",";
-
-
-  json +=
-    "\"deviceId\":\"" +
-    String(DEVICE_ID) +
-    "\",";
-
-
-  json +=
-    "\"amount\":" +
-    String(amount) +
-    ",";
-
-
-  json +=
-    "\"balanceBefore\":" +
-    String(before) +
-    ",";
-
-
-  json +=
-    "\"balanceAfter\":" +
-    String(after) +
-    ",";
-
-
-  json +=
-    "\"time\":\"" +
-    getDateTime() +
-    "\",";
-
-
-  json +=
-    "\"timestamp\":" +
-    String(getEpoch());
-
-
-  if (
-    type == "PLAY"
-  )
-  {
-    json +=
-      ",\"gameDurationSeconds\":" +
-      String(
-        GAME_DURATION_SECONDS
-      );
-  }
-
-
-  json += "}";
-
-
-  Database.push<object_t>(
-    firebaseClient,
-    "/transactions",
-    object_t(json)
-  );
 }
 
 
@@ -1208,7 +952,7 @@ void registerDeviceFirebase()
   }
 
 
-  String json = "{";
+  String json = "{\"balanceProtocolVersion\":2,";
 
 
   json +=
@@ -2023,44 +1767,13 @@ void processGame(
   }
 
 
-  int before =
-    card.balance;
-
-
-  int after =
-    before -
-    GAME_PRICE;
-
-
-  if (
-    !updateCardAfterPlay(
-      uid,
-      after
-    )
-  )
+  if (!applyMoneyOperation(uid, "PLAY", GAME_PRICE))
   {
-    showTimedMessage(
-      "DATABASE ERROR",
-      "PAYMENT FAILED",
-      "",
-      ST77XX_RED,
-      1200,
-      SCREEN_GAME
-    );
-
+    showTimedMessage("PAYMENT PENDING", moneyError, "Check before retry", ST77XX_YELLOW, 1500, SCREEN_GAME);
     return;
   }
 
-
-  // Log transaction
-  logTransaction(
-    "PLAY",
-    uid,
-    card.name,
-    GAME_PRICE,
-    before,
-    after
-  );
+  int after = moneyAfter;
 
 
   drawHeader(
@@ -2512,53 +2225,16 @@ void topupFirebaseCard()
   }
 
 
-  int amount =
-    topupAmount;
+  int amount = topupAmount;
 
-
-  int before =
-    cashierCard.balance;
-
-
-  int after =
-    before +
-    amount;
-
-
-  if (
-    !updateCardAfterTopup(
-      cashierUID,
-      amount,
-      after
-    )
-  )
+  if (!applyMoneyOperation(cashierUID, "TOPUP", amount))
   {
-    showTimedMessage(
-      "TOP-UP ERROR",
-      "FAILED",
-      "",
-      ST77XX_RED,
-      1200,
-      SCREEN_CASHIER
-    );
-
+    showTimedMessage("TOP-UP PENDING", moneyError, "Check before retry", ST77XX_YELLOW, 1500, SCREEN_CASHIER);
     return;
   }
 
-
-  // Update local cache
-  cashierCard.balance =
-    after;
-
-
-  logTransaction(
-    "TOPUP",
-    cashierUID,
-    cashierCard.name,
-    amount,
-    before,
-    after
-  );
+  int after = moneyAfter;
+  cashierCard.balance = after;
 
 
   drawHeader(
@@ -3122,6 +2798,7 @@ void handleButtons()
 
 void setup()
 {
+  initializeMoneyStorage();
   Serial.begin(
     115200
   );
@@ -3262,6 +2939,8 @@ void loop()
     WiFi.reconnect();
   }
 
+
+  recoverMoneyOperation();
 
   handleMessageTimer();
 
