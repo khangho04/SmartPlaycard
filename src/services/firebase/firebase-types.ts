@@ -1,5 +1,5 @@
 /**
- * Firebase record shapes, separate from the mock UI models.
+ * Firebase record shapes shared by services and the authenticated wallet.
  * Fields are optional because records may be incomplete. A missing record
  * should be represented by null by the service, not by an empty object.
  * These interfaces describe data; they do not validate Firebase snapshots.

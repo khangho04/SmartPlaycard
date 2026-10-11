@@ -7,7 +7,7 @@ import { useTheme } from '@/hooks/use-theme';
 
 export default function TabLayout() {
   const theme = useTheme();
-  const { isAuthenticated, isReady } = useAuth();
+  const { isAuthenticated, isReady, role } = useAuth();
 
   if (!isReady) {
     return null;
@@ -17,10 +17,13 @@ export default function TabLayout() {
     return <Redirect href="/login" />;
   }
 
+  if (role === 'admin') return <Redirect href="/admin" />;
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
+        tabBarHideOnKeyboard: true,
         tabBarActiveTintColor: Brand.primary,
         tabBarInactiveTintColor: theme.textSecondary,
         tabBarStyle: {

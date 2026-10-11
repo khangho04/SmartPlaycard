@@ -26,11 +26,11 @@ export function AnimatedPressable({
       {...props}
       style={[animatedStyle, style]}
       onPressIn={(event) => {
-        scale.value = withSpring(scaleTo, { damping: 15, stiffness: 420 });
+        scale.set(withSpring(scaleTo, { damping: 15, stiffness: 420 }));
         onPressIn?.(event);
       }}
       onPressOut={(event) => {
-        scale.value = withSpring(1, { damping: 13, stiffness: 300 });
+        scale.set(withSpring(1, { damping: 13, stiffness: 300 }));
         onPressOut?.(event);
       }}>
       {children}

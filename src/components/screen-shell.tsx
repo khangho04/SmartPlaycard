@@ -4,6 +4,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/hooks/use-theme';
+import { KeyboardForm } from '@/components/keyboard-form';
 
 type ScreenShellProps = {
   children: ReactNode;
@@ -20,7 +21,7 @@ export function ScreenShell({ children, style, edges = ['top'], animate = true }
       <Animated.View
         entering={animate ? FadeInDown.duration(360).springify().damping(18) : undefined}
         style={styles.content}>
-        {children}
+        <KeyboardForm>{children}</KeyboardForm>
       </Animated.View>
     </SafeAreaView>
   );

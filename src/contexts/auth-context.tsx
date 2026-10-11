@@ -1,84 +1,35 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as SecureStore from 'expo-secure-store';
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Platform } from 'react-native';
-
-const VALID_USERNAME = 'admin';
-const VALID_PASSWORD = '123456';
-const SESSION_KEY = 'smartplaycard.session.v1';
-
+import { changeDatabasePassword, loginDatabase, logoutDatabase, registerDatabase, restoreDatabaseSession, subscribeAuth, type DatabaseUser } from '@/services/firebase/rtdb-auth';
+import { errorText } from '@/services/service-error';
 type AuthContextValue = {
-  isAuthenticated: boolean;
-  isReady: boolean;
-  login: (username: string, password: string) => Promise<boolean>;
-  logout: () => Promise<void>;
+  user: DatabaseUser | null; role: 'admin' | 'user' | null; isAuthenticated: boolean; isReady: boolean;
+  error: string; retry: () => void; requiresPasswordChange: boolean;
+  login: (username: string, password: string) => Promise<boolean>; logout: () => Promise<void>;
+  register: (username: string, password: string) => Promise<void>;
+  changePassword: (current: string | null, password: string) => Promise<void>;
 };
-
 const AuthContext = createContext<AuthContextValue | null>(null);
-
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isReady, setIsReady] = useState(false);
-
+  const [user, setUser] = useState<DatabaseUser | null>(null);
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState('');
+  const [version, setVersion] = useState(0);
   useEffect(() => {
-    let mounted = true;
-
-    async function restoreSession() {
-      try {
-        const storedSession = Platform.OS === 'web'
-          ? await AsyncStorage.getItem(SESSION_KEY)
-          : await SecureStore.getItemAsync(SESSION_KEY);
-        if (mounted) {
-          setIsAuthenticated(storedSession === 'authenticated');
-        }
-      } finally {
-        if (mounted) {
-          setIsReady(true);
-        }
-      }
-    }
-
-    void restoreSession();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  const value = useMemo(
-    () => ({
-      isAuthenticated,
-      isReady,
-      login: async (username: string, password: string) => {
-        const success = username === VALID_USERNAME && password === VALID_PASSWORD;
-        if (success) {
-          if (Platform.OS === 'web') {
-            await AsyncStorage.setItem(SESSION_KEY, 'authenticated');
-          } else {
-            await SecureStore.setItemAsync(SESSION_KEY, 'authenticated');
-          }
-          setIsAuthenticated(true);
-        }
-        return success;
-      },
-      logout: async () => {
-        if (Platform.OS === 'web') {
-          await AsyncStorage.removeItem(SESSION_KEY);
-        } else {
-          await SecureStore.deleteItemAsync(SESSION_KEY);
-        }
-        setIsAuthenticated(false);
-      },
-    }),
-    [isAuthenticated, isReady],
-  );
-
+    let active = true;
+    const stop = subscribeAuth(value => { if (active) setUser(value); });
+    void restoreDatabaseSession().then(() => { if (active) { setReady(true); setError(''); } }).catch(e => { if (active) { setReady(true); setError(errorText(e)); } });
+    return () => { active = false; stop(); };
+  }, [version]);
+  const value = useMemo<AuthContextValue>(() => ({
+    user, role: user?.access || null, isReady: ready, error, isAuthenticated: !!user,
+    requiresPasswordChange: user?.requiresPasswordChange === true,
+    retry: () => { setReady(false); setVersion(v => v + 1); },
+    login: loginDatabase, register: registerDatabase, logout: logoutDatabase, changePassword: changeDatabasePassword,
+  }), [user, ready, error]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
-
 export function useAuth() {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
-  }
-  return context;
+  const value = useContext(AuthContext);
+  if (!value) throw new Error('AuthProvider missing');
+  return value;
 }

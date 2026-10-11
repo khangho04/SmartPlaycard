@@ -1,55 +1,53 @@
-# SmartPlaycard — Firebase
+# Firebase và giao thức SmartPlaycard v3
 
-## Luồng dữ liệu
+## Nguyên tắc
 
-- `card-service.ts`: `getCard(uid)`, `subscribeCard(uid, callback, onError)`.
-- `transaction-service.ts`: `getCardTransactions(uid)`, `subscribeCardTransactions(uid, callback, onError)`.
-- `device-service.ts`: `getDevice()`, `subscribeDevice('GAME001', callback, onError)`.
-- `rfid-service.ts`: bridge cho context và luồng nạp mô phỏng từ app; PLAY do firmware xử lý.
-- `topup-service.ts`: cộng tiền bằng transaction, lưu biên nhận cùng số dư và đồng bộ lịch sử theo cùng mã giao dịch.
-- `wallet-context.tsx`: quản lý listener, trạng thái tải/lỗi và UID đã chọn. Đổi UID, bỏ chọn thẻ hoặc đăng xuất sẽ hủy listener cũ.
-- AsyncStorage lưu `smartplaycard.selected-card-uid.v1` và yêu cầu nạp chưa hoàn tất `smartplaycard.pending-topup.v1`. Số dư luôn đọc từ Firebase.
+App User/Admin dùng Firebase Authentication và Callable Functions. ESP32 dùng một tài khoản Firebase riêng cho từng thiết bị. Số dư chỉ được thay đổi ở backend; User, Admin SDK client và ESP32 không có quyền ghi trực tiếp `cards`/`transactions`.
 
-Mẫu Firebase đã xác minh có timestamp transaction theo **giây**, field `time` dạng chuỗi, và các field `...Epoch` trên card/device. `TIME_NOT_SYNCED`/epoch `0` không xác nhận thiết bị đang online. Trạng thái trên Home là giá trị đã lưu trong database.
+`admin-backend/database.rules.json` là bộ Rules đầy đủ, mặc định đóng. `database.rules.fragment.json` cũ không còn là cấu hình triển khai; fragment đó chỉ được giữ để tham khảo. Firebase CLI dùng `firebase.admin.json` để triển khai bộ Rules đầy đủ.
 
-Query lịch sử dùng `orderByChild('uid')` và `equalTo(uid)`. Chưa sửa Rules/index. Nếu database chưa có index `uid`, Firebase JS SDK có thể tải/lọc nhiều dữ liệu hơn và cảnh báo trong console. Cần xem xét index trước khi dữ liệu lớn; không giới hạn tùy ý lịch sử khiến thiếu giao dịch.
+## Dữ liệu
 
-## Kiểm tra trên Expo Go
-
-1. Chạy `npx expo start`, mở app và đăng nhập bằng tài khoản demo hiện có.
-2. Vào **Thẻ RFID**, nhập UID chính xác đang tồn tại trong `/cards`. Bản ghi mẫu đã đọc là `2605895D`; chỉ chọn nếu đó là thẻ bạn muốn theo dõi.
-3. Nhấn **Theo dõi thẻ này**. Kiểm tra số dư khớp Firebase, bao gồm trường hợp số dư bằng 0. Ô UID chỉ chọn thẻ local, không ghi quan hệ sở hữu hoặc liên kết tài khoản lên Firebase.
-4. Thực hiện PLAY trên ESP32: số dư và History phải tự cập nhật từ Firebase; app không trừ tiền lần nữa.
-5. Nếu firmware đã có TOPUP, thực hiện qua cơ chế hiện có của thiết bị và kiểm tra app nhận số dư/giao dịch mới.
-6. Đổi sang UID khác: không được hiển thị giao dịch/số dư của thẻ cũ. UID không tồn tại hoặc không hợp lệ phải báo lỗi.
-7. Tắt mạng: app hiển thị trạng thái mất kết nối sau khi Firebase phát hiện; không thay số dư bằng 0. Bật lại mạng để listener đồng bộ tiếp.
-8. Đóng/mở app: UID được nhớ, số dư/lịch sử được đọc lại từ Firebase. **Cá nhân → Bỏ chọn thẻ** chỉ xóa lựa chọn local.
-9. Home hiển thị GAME001; chạm thẻ game để xem mode, thời lượng và heartbeat đã lưu.
-
-Nếu thấy `PERMISSION_DENIED`, dừng kiểm tra và gửi log. App không sửa Rules, không tự thêm Authentication và không tự thử một đường dẫn khác để vượt quyền.
-
-## Nạp tiền mô phỏng
-
-1. Nạp mô phỏng chỉ cần thẻ hợp lệ và kết nối Firebase có quyền ghi; không phụ thuộc GAME001 hoặc `balanceProtocolVersion`. Nếu chạy ESP32 đồng thời, dùng firmware trong `firmware/SMARTTAP` có giao thức cập nhật nguyên tử để tránh firmware cũ ghi đè số dư.
-2. Chọn thẻ RFID đang tồn tại, còn hoạt động; mở **Nạp tiền**.
-3. Chọn mệnh giá hoặc nhập số nguyên bất kỳ từ 0đ đến 5.000.000đ. Kiểm tra UID, số tiền và số dư dự kiến, rồi nhấn **OK — Nạp** để cộng vào thẻ đã chọn. Nạp 0đ vẫn ghi giao dịch, số dư không đổi.
-4. App cộng số dư và bộ đếm trong cùng transaction với biên nhận tại `cards/{uid}/_operations/{id}`, sau đó xuất lịch sử tại `transactions/{id}`. Giao dịch mới có `paymentMethod: simulation`; không kết nối ngân hàng hay thu tiền thật.
-5. Thành công hiển thị mã giao dịch, thẻ nhận, số tiền và số dư sau giao dịch. Số dư ví và lịch sử cập nhật qua listener Firebase.
-6. Nếu bị gián đoạn, mở lại app và dùng **Kiểm tra / thử lại lần nạp**. Giữ nguyên ID để không cộng lần thứ hai. Biên nhận đã ghi có thể đồng bộ lại lịch sử dù thiết bị không còn sẵn sàng hoặc thẻ đã khóa.
-
-Kiểm tra thủ công: nạp 50.000đ, nhấn nhanh nhiều lần, nhập số ngoài giới hạn, tắt/bật mạng, đổi thẻ và mở lại app khi có giao dịch chờ. Không xóa dữ liệu ứng dụng khi còn giao dịch chờ vì ID phục hồi được lưu tại máy.
-
-## Phần chưa tích hợp
-
-- Không còn giả lập quét RFID/NFC. Màn hình Quét hướng dẫn nhập UID thủ công vì chưa có giao thức nhận sự kiện quét từ ESP32.
-- Tài khoản/hồ sơ demo vẫn giữ nguyên; điểm thưởng chưa có nguồn Firebase nên hiển thị chưa có dữ liệu.
-
-## Kiểm tra code
-
-```sh
-npx tsc --noEmit
-node --test scripts/firebase-services.test.cjs
-npx expo export --platform android --output-dir .expo/firebase-check
+```text
+cards/{rfidUid}                       balance, active, ownerAuthUid, branchId, _operations
+cardHistory/{rfidUid}/{time-id}       projection từ biên nhận đã xác nhận
+catalog/games/{gameId}                mô tả, máy, chi nhánh, giá, thời lượng, enabled, version
+catalog/deviceConfig/{deviceId}       cấu hình do Admin công bố
+userData/{authUid}/profile            họ tên, điện thoại
+userData/{authUid}/notifications/{id}  thông báo, createdAt, read
+support/{ticketId}                    người gửi, chi nhánh, vấn đề, phản hồi, trạng thái
+deviceAccess/{authUid}                deviceId, branchId, enabled, canTopUp
+deviceProvision/{deviceId}            authUid, branchId, enabled, canTopUp
+deviceRequests/{deviceId}/{id}        yêu cầu bất biến PLAY/TOPUP/CREATE
+deviceResults/{deviceId}/{id}         biên nhận/trạng thái do backend trả về
+deviceEvents/{deviceId}/{id}          nhận thẻ, xung relay, phản hồi hoặc lỗi
+devices/{deviceId}                    heartbeat, configVersion, playing, trạng thái
+cashReceipts/{stableId}               giữ danh tính biên nhận quầy để chống nạp trùng
+admin/operations                     quyền, chi nhánh, metadata, cảnh báo, bảo trì, audit
+admin/ledger                         ledger xác nhận từ backend
+admin/reportDays                     tổng hợp ngày UTC+7
 ```
 
-Test service dùng Firebase giả lập, không ghi dữ liệu thật. Bundle Android và test tự động không thay thế kiểm tra ESP32 + Expo Go trên thiết bị.
+Heartbeat/transaction timestamp dùng Unix seconds; ledger/notifications dùng Unix milliseconds. Giá và số dư là số nguyên VND. Game không sẵn sàng khi chưa có ack đúng cấu hình, heartbeat cũ hoặc lỗi.
+
+## Nghiệp vụ phần cứng
+
+1. ESP32 lưu yêu cầu cùng ID vào NVS rồi tạo `deviceRequests`.
+2. `processDeviceRequest` kiểm tra thiết bị còn quyền, chi nhánh, loại thao tác và cấu hình.
+3. Backend cập nhật tiền và `_operations/{id}` cùng transaction. Receipt trùng trả lại kết quả đã lưu; thẻ bị khóa/thiếu tiền nhận REJECTED.
+4. Backend xuất transaction/ledger khi phù hợp, rồi ghi `deviceResults`.
+5. ESP32 đọc result thành công mới phát xung relay. Retry result/history không phát thêm xung.
+6. Sự kiện nhận diện/lượt chơi được backend chuyển thành thông báo đúng User. Không phát thông báo bắt đầu thật khi chỉ có xung mà chưa có phản hồi máy.
+
+Thẻ CREATE chỉ được tạo bởi thiết bị đã cấp quyền cashier. UID của thẻ không phải Firebase Auth UID. Quyền sở hữu chỉ do Admin gán; User không tự claim thẻ bằng UID.
+
+## Giới hạn vận hành
+
+- Nạp thật hiện qua nhân viên thu ngân/Admin; chưa có cổng thanh toán trực tuyến.
+- Mất điện quanh xung relay được coi là không rõ kết quả; không tự phát lại xung hoặc hoàn tiền. Nhân viên cần đối soát.
+- Dữ liệu/lịch sử mô phỏng trước đây không được tự chuyển thành doanh thu. Không tự reset số dư cũ.
+- Hộp thư thông báo được cập nhật bằng polling; chưa có push khi app đóng.
+- Lịch sử User tải 100 giao dịch gần nhất từ projection mới; giao dịch cũ trước khi triển khai trigger chưa tự backfill.
+- Cần chính sách lưu trữ/phân trang khi request, receipt, sự kiện và thông báo tăng. Không xóa receipt chống trùng tùy tiện.
+
+Hướng dẫn cấu hình và triển khai: [Triển khai đồng bộ](TRIEN_KHAI_DONG_BO.md).

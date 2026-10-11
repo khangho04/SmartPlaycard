@@ -1,0 +1,45 @@
+{
+  "rules": {
+    ".read": true,
+    ".write": true,
+    "accounts": {
+      ".indexOn": [
+        "username"
+      ]
+    },
+    "cards": {
+      ".indexOn": [
+        "ownerAuthUid",
+        "branchId"
+      ]
+    },
+    "transactions": {
+      ".indexOn": [
+        "uid",
+        "timestamp",
+        "branchId"
+      ]
+    },
+    "support": {
+      ".indexOn": [
+        "userId",
+        "branchId"
+      ]
+    },
+    "catalog": {
+      "games": {
+        ".indexOn": [
+          "enabled",
+          "branchId"
+        ]
+      }
+    },
+    "admin": {
+      "ledger": {
+        ".indexOn": [
+          "occurredAt"
+        ]
+      }
+    }
+  }
+}

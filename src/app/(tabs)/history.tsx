@@ -32,7 +32,7 @@ export default function HistoryScreen() {
   return (
     <ScreenShell>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <ScreenHeader title="Lịch sử giao dịch" subtitle="Theo dõi mọi lần nạp tiền, chơi game và hoàn tiền trên thẻ RFID." />
+        <ScreenHeader title="Lịch sử giao dịch" subtitle="100 giao dịch gần nhất của thẻ đang chọn." />
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
           {filters.map((filter) => {

@@ -36,16 +36,16 @@ export function formatFirebaseTime(value?: FirebaseTimestamp, epochSeconds?: num
 
 export function mapTransaction(record: CardTransaction): HistoryItem {
   const kind = record.type?.toUpperCase();
-  const type = kind === 'PLAY' ? 'play' : kind === 'TOPUP' ? 'topup' : 'unknown';
+  const type = kind === 'PLAY' ? 'play' : kind === 'TOPUP' ? 'topup' : kind === 'REFUND' ? 'refund' : kind === 'BONUS' ? 'bonus' : 'unknown';
   // Prefer the recorded balance delta, never perform or repeat a transaction.
   const amount = record.balanceBefore !== undefined && record.balanceAfter !== undefined
     ? record.balanceAfter - record.balanceBefore
     : record.amount === undefined ? null
       : type === 'play' ? -Math.abs(record.amount)
-        : type === 'topup' ? Math.abs(record.amount) : record.amount;
+        : ['topup', 'refund', 'bonus'].includes(type) ? Math.abs(record.amount) : record.amount;
   return {
     id: record.id, type, amount,
-    title: type === 'play' ? 'Chơi game' : type === 'topup' ? 'Nạp tiền' : `Giao dịch ${record.type ?? 'chưa rõ loại'}`,
+    title: type === 'play' ? 'Chơi game' : type === 'topup' ? 'Nạp tiền' : type === 'refund' ? 'Hoàn tiền' : type === 'bonus' ? 'Tiền thưởng' : `Giao dịch ${record.type ?? 'chưa rõ loại'}`,
     subtitle: [record.deviceId, record.cardName ?? record.uid].filter(Boolean).join(' • '),
     time: formatFirebaseTime(record.time ?? record.timestamp, typeof record.timestamp === 'number' ? record.timestamp : undefined),
   };

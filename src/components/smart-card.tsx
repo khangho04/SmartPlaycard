@@ -8,10 +8,10 @@ import { Brand, Radius, Spacing } from '@/constants/theme';
 import { useWallet } from '@/contexts/wallet-context';
 
 type SmartCardProps = {
-  onScanPress?: () => void;
+  onEnterUidPress?: () => void;
 };
 
-export function SmartCard({ onScanPress }: SmartCardProps) {
+export function SmartCard({ onEnterUidPress }: SmartCardProps) {
   const { wallet, uid, cardMessage } = useWallet();
 
   return (
@@ -39,9 +39,9 @@ export function SmartCard({ onScanPress }: SmartCardProps) {
           <Text style={styles.balanceLabel}>Số dư khả dụng</Text>
           <Text style={styles.balance}>{formatBalance(wallet.balance)}</Text>
         </View>
-        <AnimatedPressable style={styles.scanButton} onPress={onScanPress}>
-          <Ionicons name="scan" size={18} color={Brand.primaryDark} />
-          <Text style={styles.scanText}>Quét thẻ</Text>
+        <AnimatedPressable accessibilityRole="button" accessibilityLabel="Nhập UID thẻ" style={styles.uidButton} onPress={onEnterUidPress}>
+          <Ionicons name="keypad-outline" size={18} color={Brand.primaryDark} />
+          <Text style={styles.uidButtonText}>Nhập UID</Text>
         </AnimatedPressable>
       </View>
     </LinearGradient>
@@ -97,6 +97,8 @@ const styles = StyleSheet.create({
   },
   footerRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.md,
     justifyContent: 'space-between',
     alignItems: 'flex-end',
     marginTop: Spacing.lg,
@@ -111,16 +113,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 4,
   },
-  scanButton: {
+  uidButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     backgroundColor: '#FFFFFF',
     paddingHorizontal: 14,
     paddingVertical: 10,
+    minHeight: 44,
     borderRadius: Radius.pill,
   },
-  scanText: {
+  uidButtonText: {
     color: Brand.primaryDark,
     fontWeight: '700',
     fontSize: 13,

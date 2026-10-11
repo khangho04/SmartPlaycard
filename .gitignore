@@ -5,10 +5,11 @@ node_modules/
 
 # Expo
 .expo/
-.expo-android-build/
-.expo-web-build/
 dist/
 web-build/
+.expo-*-build/
+firebase-debug.log
+database-debug.log
 expo-env.d.ts
 
 # Native
@@ -34,6 +35,11 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env
+.env.*
+!.env.example
+*service-account*.json
+*serviceAccount*.json
 
 # typescript
 *.tsbuildinfo
@@ -43,3 +49,6 @@ example
 # generated native folders
 /ios
 /android
+
+# Local device credentials and TLS configuration
+firmware/SMARTTAP/SmartTapConfig.h

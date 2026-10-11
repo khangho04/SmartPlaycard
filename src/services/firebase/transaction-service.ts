@@ -1,4 +1,4 @@
-import { equalTo, get, onValue, orderByChild, query, ref, type DataSnapshot } from 'firebase/database';
+import { get, onValue, ref, type DataSnapshot } from 'firebase/database';
 
 import { database } from './firebase-config';
 import type { Transaction } from './firebase-types';
@@ -13,8 +13,8 @@ const transactionSchema: RecordSchema<Transaction> = {
 };
 
 function cardQuery(uid: string) {
-  // Without a uid index the SDK may download/filter more data. Never change Rules here.
-  return query(ref(database, 'transactions'), orderByChild('uid'), equalTo(validateKey(uid)));
+  validateKey(uid);
+  return ref(database, 'transactions');
 }
 
 function readTransactions(snapshot: DataSnapshot, uid: string): CardTransaction[] {

@@ -1,181 +1,85 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useAuth } from './auth-context';
-import type { Card, Device } from '@/services/firebase/firebase-types';
-import type { CardTransaction } from '@/services/firebase/transaction-service';
-import { validateKey } from '@/services/firebase/record-utils';
-import { getRfidService, readErrorMessage } from '@/services/rfid-service';
+import { errorText, type UserSnapshot } from '@/services/platform';
+import { readUserWallet } from '@/services/firebase/user-wallet';
 import { formatFirebaseTime, mapTransaction } from '@/services/wallet-mapping';
-
-const UID_KEY = 'smartplaycard.selected-card-uid.v1';
-
-function useFirebaseWallet(isAuthenticated: boolean) {
+function useFirebaseWallet(accountId: string | null) {
   const [uid, setUid] = useState<string | null>(null);
-  const [card, setCard] = useState<Card | null>(null);
-  const [device, setDevice] = useState<Device | null>(null);
-  const [records, setRecords] = useState<CardTransaction[]>([]);
-  const [cardError, setCardError] = useState('');
-  const [historyError, setHistoryError] = useState('');
-  const [deviceError, setDeviceError] = useState('');
-  const [cardReady, setCardReady] = useState(false);
-  const [historyReady, setHistoryReady] = useState(false);
-  const [deviceReady, setDeviceReady] = useState(false);
+  const [data, setData] = useState<UserSnapshot | null>(null);
+  const [error, setError] = useState('');
+  const [ready, setReady] = useState(false);
   const [connected, setConnected] = useState(false);
-  const [subscriptionVersion, setSubscriptionVersion] = useState(0);
-  const selection = useRef({ version: 0, active: true });
-  const listenerGeneration = useRef(0);
-
+  const [selectionReady, setSelectionReady] = useState(false);
+  const generation = useRef(0);
+  const selected = useRef<string | null>(null);
+  const accountKey = `smartplaycard.card.${accountId}`;
   useEffect(() => {
     let active = true;
-    const request = selection.current;
-    request.active = true;
-    const version = ++request.version;
-    if (isAuthenticated) {
-      void AsyncStorage.getItem(UID_KEY).then((stored) => {
-        if (active && request.version === version && stored) setUid(validateKey(stored));
-      }).catch((error: unknown) => {
-        if (active) setCardError(error instanceof Error ? error.message : String(error));
-      });
+    if (!accountId) return;
+    void AsyncStorage.getItem(accountKey).then((stored) => {
+      if (active) { selected.current = stored; setUid(stored); setSelectionReady(true); }
+    }).catch(() => { if (active) setSelectionReady(true); });
+    return () => { active = false; };
+  }, [accountId, accountKey]);
+  const refresh = useCallback(async () => {
+    if (!accountId || !selectionReady) return;
+    const request = ++generation.current;
+    try {
+      const value = await readUserWallet(accountId, selected.current);
+      if (request !== generation.current) return;
+      setData(value); setConnected(true); setError(''); setReady(true);
+    } catch (e) {
+      if (request !== generation.current) return;
+      setData(null); setConnected(false); setError(errorText(e)); setReady(true);
+      if ((e as { code?: string }).code === 'functions/permission-denied' && selected.current) {
+        selected.current = null; setUid(null); void AsyncStorage.removeItem(accountKey);
+      }
     }
-    return () => { active = false; request.active = false; request.version++; };
-  }, [isAuthenticated]);
-
+  }, [accountId, selectionReady, accountKey]);
   useEffect(() => {
-    if (!isAuthenticated) return;
-    let active = true;
-    const service = getRfidService();
-    const fail = (error: Error) => {
-      if (!active) return;
-      setDevice(null);
-      setDeviceReady(true);
-      setDeviceError(readErrorMessage(error));
-      console.error('[Firebase device]', error);
-    };
-    const stopConnection = service.subscribeConnection((value) => {
-      if (active) setConnected(value);
-    }, fail);
-    const stopDevice = service.subscribeDevice('GAME001', (value) => {
-      if (!active) return;
-      setDevice(value);
-      setDeviceReady(true);
-      setDeviceError('');
-    }, fail);
-    return () => { active = false; stopConnection(); stopDevice(); };
-  }, [isAuthenticated]);
-
-  useEffect(() => {
-    if (!isAuthenticated || !uid) return;
-    let active = true;
-    const generation = listenerGeneration.current;
-    const isCurrent = () => active && generation === listenerGeneration.current;
-    const service = getRfidService();
-    const stopCard = service.subscribeCard(uid, (value) => {
-      if (!isCurrent()) return;
-      setCard(value);
-      setCardReady(true);
-      setCardError('');
-    }, (error) => {
-      if (!isCurrent()) return;
-      setCard(null);
-      setCardReady(true);
-      setCardError(readErrorMessage(error));
-      console.error('[Firebase card]', error);
-    });
-    const stopHistory = service.subscribeTransactions(uid, (value) => {
-      if (!isCurrent()) return;
-      setRecords(value);
-      setHistoryReady(true);
-      setHistoryError('');
-    }, (error) => {
-      if (!isCurrent()) return;
-      setRecords([]);
-      setHistoryReady(true);
-      setHistoryError(readErrorMessage(error));
-      console.error('[Firebase history]', error);
-    });
-    return () => { active = false; stopCard(); stopHistory(); };
-  }, [isAuthenticated, uid, subscriptionVersion]);
-
+    const requests = generation;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => { await refresh(); if (!stopped) timer = setTimeout(poll, 10000); };
+    void poll();
+    return () => { stopped = true; clearTimeout(timer); requests.current++; };
+  }, [refresh, uid]);
   async function selectCard(input: string) {
-    const key = validateKey(input);
-    if (!isAuthenticated) throw new Error('Hãy đăng nhập trước khi chọn thẻ.');
-    const request = selection.current;
-    const version = ++request.version;
-    const value = await getRfidService().getCard(key);
-    if (!request.active || version !== request.version) throw new Error('Thao tác chọn thẻ đã bị hủy.');
-    if (!value) throw new Error('Không tìm thấy thẻ trên Firebase. Kiểm tra UID chính xác.');
-    // Persist only a local selection preference, never balance or transactions.
-    await AsyncStorage.setItem(UID_KEY, key);
-    if (!request.active || version !== request.version) throw new Error('Thao tác chọn thẻ đã bị hủy.');
-    listenerGeneration.current++;
-    setCard(null);
-    setRecords([]);
-    setCardReady(false);
-    setHistoryReady(false);
-    setCardError('');
-    setHistoryError('');
-    setUid(key);
-    setSubscriptionVersion((value) => value + 1);
+    if (!accountId) throw new Error('Hãy đăng nhập.');
+    const key = input.trim();
+    const request = ++generation.current;
+    const value = await readUserWallet(accountId, key);
+    if (request !== generation.current) throw new Error('Thao tác đã bị hủy.');
+    await AsyncStorage.setItem(accountKey, key);
+    selected.current = key; setUid(key); setData(value); setConnected(true); setError(''); setReady(true);
   }
-
   async function clearSelectedCard() {
-    ++selection.current.version;
-    listenerGeneration.current++;
-    setUid(null);
-    setCard(null);
-    setRecords([]);
-    setCardError('');
-    setHistoryError('');
-    await AsyncStorage.removeItem(UID_KEY);
+    generation.current++; selected.current = null; setUid(null); setData(null);
+    await AsyncStorage.removeItem(accountKey);
   }
-
-  const visibleCard = isAuthenticated && uid ? card : null;
-  const cardMessage = !isAuthenticated ? 'Hãy đăng nhập.'
-    : cardError || (!uid ? 'Chưa chọn thẻ. Nhập UID tại màn hình Thẻ RFID.'
-      : !connected ? 'Chưa kết nối Firebase. Đang chờ kết nối...'
-        : !cardReady ? 'Đang đọc thẻ...'
-          : !card ? 'Không tìm thấy thẻ trên Firebase.'
-            : card.balance === undefined ? 'Thẻ chưa có dữ liệu số dư.' : '');
-  const historyMessage = historyError || (!uid ? 'Chưa chọn thẻ.'
-    : !connected ? 'Chưa kết nối Firebase.'
-      : !historyReady ? 'Đang tải lịch sử...' : '');
-  const deviceMessage = deviceError || (!connected ? 'Chưa kết nối Firebase.'
-    : !deviceReady ? 'Đang tải GAME001...' : !device ? 'Không tìm thấy GAME001.' : '');
-
+  const card = data?.card || null;
   return {
-    uid: isAuthenticated ? uid : null,
-    card: visibleCard,
-    device: isAuthenticated ? device : null,
-    connected, cardMessage, historyMessage, deviceMessage,
-    isReady: cardReady && historyReady,
-    wallet: {
-      balance: connected && !cardError ? visibleCard?.balance ?? null : null,
-      bonusPoints: null,
-      lastTopUp: formatFirebaseTime(visibleCard?.lastTopupAt, visibleCard?.lastTopupAtEpoch),
-    },
-    transactions: useMemo(() => isAuthenticated && uid ? records.map(mapTransaction) : [], [isAuthenticated, uid, records]),
-    selectCard,
-    clearSelectedCard,
+    uid, card, data, error, connected, isReady: ready, refresh,
+    cardMessage: error || (!uid ? 'Nhập UID thẻ để xem số dư và lịch sử giao dịch.' : !ready ? 'Đang tải...' : !card ? 'Chưa có dữ liệu thẻ.' : ''),
+    historyMessage: error || (!uid ? 'Chưa chọn thẻ.' : !ready ? 'Đang tải lịch sử...' : ''),
+    wallet: { balance: connected ? card?.balance ?? null : null, bonusPoints: null, lastTopUp: formatFirebaseTime(card?.lastTopupAt, card?.lastTopupAtEpoch) },
+    transactions: (data?.transactions || []).map(mapTransaction), selectCard, clearSelectedCard,
   };
 }
-
 type WalletContextValue = ReturnType<typeof useFirebaseWallet>;
 const WalletContext = createContext<WalletContextValue | null>(null);
-
-function WalletSession({ children, authenticated }: { children: ReactNode; authenticated: boolean }) {
-  const value = useFirebaseWallet(authenticated);
+function WalletSession({ children, accountId }: { children: ReactNode; accountId: string | null }) {
+  const value = useFirebaseWallet(accountId);
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
 }
-
 export function WalletProvider({ children }: { children: ReactNode }) {
-  const { isAuthenticated } = useAuth();
-  // A new auth session owns fresh state and listeners; logout discards old data.
-  return <WalletSession key={String(isAuthenticated)} authenticated={isAuthenticated}>{children}</WalletSession>;
+  const { user, role } = useAuth();
+  const accountId = role === 'user' ? user?.uid || null : null;
+  return <WalletSession key={accountId || 'signed-out'} accountId={accountId}>{children}</WalletSession>;
 }
-
 export function useWallet() {
-  const context = useContext(WalletContext);
-  if (!context) throw new Error('useWallet must be used within WalletProvider');
-  return context;
+  const value = useContext(WalletContext);
+  if (!value) throw new Error('WalletProvider missing');
+  return value;
 }

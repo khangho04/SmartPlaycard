@@ -1,4 +1,6 @@
 #define ENABLE_DATABASE
+#define ENABLE_USER_AUTH
+#include "SmartTapConfig.h"
 
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
@@ -17,16 +19,15 @@
 // WIFI
 // =====================================================
 
-#define WIFI_SSID     "YOUR_WIFI_NAME"
-#define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
+#define WIFI_SSID SMARTTAP_WIFI_SSID
+#define WIFI_PASSWORD SMARTTAP_WIFI_PASSWORD
 
 
 // =====================================================
 // FIREBASE
 // =====================================================
 
-#define DATABASE_URL \
-"https://rfid-001-270d9-default-rtdb.asia-southeast1.firebasedatabase.app"
+#define DATABASE_URL SMARTTAP_DATABASE_URL
 
 WiFiClientSecure sslClient;
 
@@ -34,7 +35,7 @@ using AsyncClient = AsyncClientClass;
 
 AsyncClient firebaseClient(sslClient);
 
-NoAuth noAuth;
+UserAuth deviceAuth(SMARTTAP_API_KEY, SMARTTAP_DEVICE_EMAIL, SMARTTAP_DEVICE_PASSWORD, 3000);
 
 FirebaseApp app;
 
@@ -45,12 +46,13 @@ RealtimeDatabase Database;
 // DEVICE
 // =====================================================
 
-#define DEVICE_ID "GAME001"
-#define GAME_NAME "Racing Game"
+#define DEVICE_ID SMARTTAP_DEVICE_ID
+String gameName = "Waiting for Admin";
+#define GAME_NAME gameName
 
-const int GAME_PRICE = 20000;
+int GAME_PRICE = 0;
 
-const int GAME_DURATION_SECONDS = 180;
+int GAME_DURATION_SECONDS = 0;
 
 
 // =====================================================
@@ -500,7 +502,7 @@ void connectWiFi()
 
 void initializeFirebase()
 {
-  sslClient.setInsecure();
+  sslClient.setCACert(SMARTTAP_ROOT_CA);
 
   sslClient.setConnectionTimeout(
     1000
@@ -513,7 +515,7 @@ void initializeFirebase()
   initializeApp(
     firebaseClient,
     app,
-    getAuth(noAuth)
+    getAuth(deviceAuth)
   );
 
   app.getApp<
@@ -753,120 +755,19 @@ FirebaseCard getCardFromFirebase(
 // CREATE CARD
 // =====================================================
 
+#include "SmartTapSync.h"
 #include "SmartTapAtomic.h"
 
-bool createFirebaseCard(
-  const String &uid
-)
-{
-  if (
-    !firebaseReady()
-  )
-  {
-    return false;
-  }
-
-
-  String cardName =
-    "Card " + uid;
-
-
-  String json = "{";
-
-
-  json +=
-    "\"uid\":\"" +
-    uid +
-    "\",";
-
-
-  json +=
-    "\"name\":\"" +
-    jsonEscape(cardName) +
-    "\",";
-
-
-  json +=
-    "\"balance\":0,";
-
-
-  json +=
-    "\"active\":true,";
-
-
-  json +=
-    "\"createdAt\":\"" +
-    getDateTime() +
-    "\",";
-
-
-  json +=
-    "\"createdAtEpoch\":" +
-    String(getEpoch()) +
-    ",";
-
-
-  json +=
-    "\"updatedAt\":\"" +
-    getDateTime() +
-    "\",";
-
-
-  json +=
-    "\"playCount\":0,";
-
-
-  json +=
-    "\"topupCount\":0,";
-
-
-  json +=
-    "\"totalSpent\":0,";
-
-
-  json +=
-    "\"totalTopup\":0,";
-
-
-  json +=
-    "\"lastPlayedAt\":\"Never\",";
-
-
-  json +=
-    "\"lastTopupAt\":\"Never\"";
-
-
-  json += "}";
-
-
-  bool result =
-    Database.set<object_t>(
-      firebaseClient,
-      "/cards/" + uid,
-      object_t(json),
-      "null_etag"
-    );
-
-
-  return
-    result &&
-    firebaseClient
-      .lastError()
-      .code() == 0;
+bool createFirebaseCard(const String &uid) {
+  return applyMoneyOperation(uid, "CREATE", 0);
 }
-
-
-// =====================================================
-// DEVICE STATE
-//
-// only update when changed
-// =====================================================
 
 void updateDeviceState(
   const String &status,
   const String &mode
 )
 {
+  if (sessionActive) { syncSessionStatus(sessionConfirmed ? "playing" : "awaiting_confirmation", sessionConfirmed); return; }
   // No duplicated writes
   if (
     status ==
@@ -952,7 +853,11 @@ void registerDeviceFirebase()
   }
 
 
-  String json = "{\"balanceProtocolVersion\":2,";
+  String provisionRaw = Database.get<String>(firebaseClient, "/deviceProvision/" + String(DEVICE_ID));
+  JsonDocument provision;
+  if (firebaseClient.lastError().code() != 0 || deserializeJson(provision, provisionRaw) || provision["enabled"] != true) return;
+  configuredBranchId = provision["branchId"].as<String>();
+  String json = "{\"balanceProtocolVersion\":3,\"branchId\":\"" + configuredBranchId + "\",\"firmwareVersion\":\"3.0.0\",";
 
 
   json +=
@@ -1003,7 +908,7 @@ void registerDeviceFirebase()
   json += "}";
 
 
-  Database.set<object_t>(
+  bool registered = Database.update<object_t>(
     firebaseClient,
     "/devices/" +
     String(DEVICE_ID),
@@ -1011,6 +916,7 @@ void registerDeviceFirebase()
   );
 
 
+  deviceRegistered = registered;
   lastDeviceStatus =
     "online";
 
@@ -1689,6 +1595,11 @@ void processGame(
   const String &uid
 )
 {
+  syncGameConfiguration(true);
+  if (!configuredEnabled || sessionActive || !syncStorageReady || getEpoch() <= 0 || (SMARTTAP_ERROR_PIN >= 0 && digitalRead(SMARTTAP_ERROR_PIN) == SMARTTAP_FEEDBACK_ACTIVE_LEVEL)) {
+    showTimedMessage("GAME NOT READY", "CHECK ADMIN / SESSION", "", ST77XX_YELLOW, 1500, SCREEN_GAME);
+    return;
+  }
   FirebaseCard card =
     getCardFromFirebase(
       uid
@@ -1774,6 +1685,7 @@ void processGame(
   }
 
   int after = moneyAfter;
+  syncSessionStatus("awaiting_confirmation", false);
 
 
   drawHeader(
@@ -1796,7 +1708,7 @@ void processGame(
 
 
   tft.print(
-    "SUCCESS"
+    "PULSE SENT"
   );
 
 
@@ -2396,6 +2308,11 @@ void handleRFID()
   lastScanTime =
     now;
 
+  if (!queueDeviceEvent("CARD_READ", uid)) {
+    Serial.println("Scan event storage full/unavailable; payment stopped");
+    mfrc522.PICC_HaltA(); mfrc522.PCD_StopCrypto1(); return;
+  }
+
 
   if (
     screenState ==
@@ -2798,6 +2715,7 @@ void handleButtons()
 
 void setup()
 {
+  initializeSync();
   initializeMoneyStorage();
   Serial.begin(
     115200
@@ -2940,6 +2858,10 @@ void loop()
   }
 
 
+  if (!deviceRegistered && firebaseReady()) registerDeviceFirebase();
+  syncGameConfiguration();
+  tickSession();
+  flushDeviceEvents();
   recoverMoneyOperation();
 
   handleMessageTimer();

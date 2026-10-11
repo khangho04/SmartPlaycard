@@ -1,0 +1,17 @@
+{
+  "username": "admin",
+  "createdAt": "2026-10-11T04:53:56.689Z",
+  "card": "",
+  "access": "admin",
+  "adminRole": "super_admin",
+  "branchId": "",
+  "isDefaultAdmin": true,
+  "requiresPasswordChange": true,
+  "credential": {
+    "algorithm": "pbkdf2-sha256",
+    "salt": "4e610eb8b9a1a03213b9040e67f21b18",
+    "hash": "534ceac05d626b44d6b03dbab4d029482271f15d93151fe9a1dfba5e25cdc248",
+    "iterations": 100000,
+    "version": "454b9b6c-15b9-4c86-b882-339623594915"
+  }
+}

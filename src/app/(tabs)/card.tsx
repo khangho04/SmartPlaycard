@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useRef, useState } from 'react';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { FormScrollView } from '@/components/keyboard-form';
 
 import { AnimatedPressable } from '@/components/animated-pressable';
 import { ScreenHeader } from '@/components/screen-header';
@@ -11,29 +11,31 @@ import { cardStatus, formatBalance, formatFirebaseTime } from '@/services/wallet
 import { Brand, Radius, Spacing } from '@/constants/theme';
 import { useWallet } from '@/contexts/wallet-context';
 import { useTheme } from '@/hooks/use-theme';
-import { readErrorMessage } from '@/services/rfid-service';
+import { errorText } from '@/services/service-error';
 
 export default function CardScreen() {
   const theme = useTheme();
-  const { wallet, uid, card, selectCard } = useWallet();
+  const { wallet, uid, card, selectCard, data } = useWallet();
+  const uidInput = useRef<TextInput>(null);
   const [inputUid, setInputUid] = useState('');
   const [selecting, setSelecting] = useState(false);
   const [selectionMessage, setSelectionMessage] = useState('');
 
   const handleSelect = async () => {
-    if (selecting) return;
+    if (selecting || !inputUid.trim()) return;
     setSelecting(true);
     setSelectionMessage('');
     try {
       await selectCard(inputUid);
-      setSelectionMessage('Đã chọn thẻ để theo dõi.');
+      setSelectionMessage('Đã tải dữ liệu thẻ.');
     } catch (error) {
-      setSelectionMessage(readErrorMessage(error instanceof Error ? error : new Error(String(error))));
+      setSelectionMessage(errorText(error));
     } finally {
       setSelecting(false);
     }
   };
   const cardDetails = [
+    { icon: 'business' as const, label: 'Chi nhánh quản lý thẻ', value: data?.branches.find((b) => b.id === card?.branchId)?.name || 'Chưa xác định chi nhánh' },
     { icon: 'finger-print' as const, label: 'Mã thẻ RFID', value: uid ?? 'Chưa chọn thẻ' },
     { icon: 'checkmark-circle' as const, label: 'Trạng thái', value: cardStatus(card) },
     { icon: 'calendar' as const, label: 'Chơi gần nhất', value: formatFirebaseTime(card?.lastPlayedAt, card?.lastPlayedAtEpoch) },
@@ -42,9 +44,33 @@ export default function CardScreen() {
 
   return (
     <ScreenShell>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <ScreenHeader title="Thẻ RFID của tôi" subtitle="Kiểm tra số dư và trạng thái liên kết của thẻ thông minh." />
-        <SmartCard onScanPress={() => router.push('/scan')} />
+      <FormScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <ScreenHeader title="Thẻ RFID" subtitle="Kiểm tra số dư và trạng thái thẻ theo UID." />
+        <SmartCard onEnterUidPress={() => uidInput.current?.focus()} />
+
+        <Text style={{ color: theme.textSecondary }}>Nhập UID thẻ để tải số dư và lịch sử giao dịch từ Firebase.</Text>
+        <TextInput
+          ref={uidInput}
+          value={inputUid}
+          onChangeText={setInputUid}
+          placeholder="Nhập UID thẻ RFID"
+          placeholderTextColor={theme.textSecondary}
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="done"
+          onSubmitEditing={() => void handleSelect()}
+          editable={!selecting}
+          accessibilityLabel="UID thẻ RFID"
+          style={[styles.secondaryButton, { borderColor: theme.border, color: theme.text, paddingHorizontal: Spacing.md }]}
+        />
+        {selectionMessage ? <Text style={{ color: theme.textSecondary }}>{selectionMessage}</Text> : null}
+        <AnimatedPressable
+          style={[styles.secondaryButton, { borderColor: theme.border }]}
+          disabled={selecting || !inputUid.trim()}
+          onPress={() => void handleSelect()}>
+          <Ionicons name="link" size={18} color={Brand.primary} />
+          <Text style={[styles.secondaryButtonText, { color: Brand.primary }]}>{selecting ? 'Đang tải...' : 'Lấy dữ liệu thẻ'}</Text>
+        </AnimatedPressable>
 
         <View style={styles.detailList}>
           {cardDetails.map((item) => (
@@ -60,27 +86,7 @@ export default function CardScreen() {
           ))}
         </View>
 
-        <Text style={{ color: theme.textSecondary }}>Nhập UID đúng như trên Firebase để theo dõi thẻ trên điện thoại này.</Text>
-        <TextInput
-          value={inputUid}
-          onChangeText={setInputUid}
-          placeholder="UID thẻ RFID"
-          placeholderTextColor={theme.textSecondary}
-          autoCapitalize="none"
-          autoCorrect={false}
-          editable={!selecting}
-          accessibilityLabel="UID thẻ RFID"
-          style={[styles.secondaryButton, { borderColor: theme.border, color: theme.text, paddingHorizontal: Spacing.md }]}
-        />
-        {selectionMessage ? <Text style={{ color: theme.textSecondary }}>{selectionMessage}</Text> : null}
-        <AnimatedPressable
-          style={[styles.secondaryButton, { borderColor: theme.border }]}
-          disabled={selecting || !inputUid.trim()}
-          onPress={() => void handleSelect()}>
-          <Ionicons name="link" size={18} color={Brand.primary} />
-          <Text style={[styles.secondaryButtonText, { color: Brand.primary }]}>{selecting ? 'Đang kiểm tra...' : 'Theo dõi thẻ này'}</Text>
-        </AnimatedPressable>
-      </ScrollView>
+      </FormScrollView>
     </ScreenShell>
   );
 }
