@@ -1,10 +1,10 @@
-import { get, ref, runTransaction, update } from 'firebase/database';
+import { get, onValue, ref, runTransaction, update } from 'firebase/database';
 import { randomUUID, digestStringAsync, CryptoDigestAlgorithm } from 'expo-crypto';
 import { database } from './firebase-config';
 import { auth, findAccount, type AccountRecord } from './rtdb-auth';
 import { validateKey } from './record-utils';
 import { accountEmail } from '../account-identity';
-import { dateKey, emptyMetric, roles, validRange, type Access, type AdminSnapshot, type AdminReport, type LedgerEntry, type Branch, type AdminDevice, type AdminAlert, type Maintenance, type Audit, type Metric } from '../admin/model';
+import { dateKey, emptyMetric, maintenanceAlerts, roles, validRange, type Access, type AdminSnapshot, type AdminReport, type LedgerEntry, type Branch, type AdminDevice, type AdminAlert, type Maintenance, type Audit, type Metric } from '../admin/model';
 import type { Game, PlatformAdmin, Ticket, Notice } from '../platform';
 import type { Card, Transaction } from './firebase-types';
 
@@ -40,24 +40,29 @@ export async function directSnapshot(): Promise<AdminSnapshot> {
     read<Record<string, Ticket>>('support'), access.role === 'super_admin' ? read<Record<string, AccountRecord>>('accounts') : Promise.resolve(null),
   ]);
   const data = ops || {};
-  const deviceList = rows(devices).map(d => ({ ...d, ...data.devices?.[d.id], id: d.id, branchId: data.devices?.[d.id]?.branchId ?? d.branchId ?? '', firmware: d.firmwareVersion || d.firmware || '' })).filter(d => inScope(access, d.branchId));
+  const deviceList = rows(devices).map(d => ({ ...d, name: data.devices?.[d.id]?.name ?? d.name, note: data.devices?.[d.id]?.note ?? d.note, branchId: data.devices?.[d.id]?.branchId ?? d.branchId ?? '', firmware: d.firmwareVersion || d.firmware || '' })).filter(d => inScope(access, d.branchId));
   const ids = new Set(deviceList.map(d => d.id));
   const users = access.role === 'super_admin' ? Object.entries(accounts || {}).filter(([, a]) => a.access === 'admin').map(([uid, a]): Access => ({
     uid, email: accountEmail(a.username), role: a.isDefaultAdmin ? 'super_admin' : a.adminRole || data.access?.[uid]?.role || 'viewer',
     branchId: a.isDefaultAdmin ? '' : a.branchId ?? data.access?.[uid]?.branchId ?? '', isDefaultAdmin: a.isDefaultAdmin,
   })) : [];
   return { access, devices: deviceList, branches: rows(data.branches).filter(b => inScope(access, b.id)),
-    alerts: rows(data.alerts).filter(a => ids.has(a.deviceId)).sort((a,b) => b.updatedAt-a.updatedAt),
+    alerts: [...rows(data.alerts).filter(a => ids.has(a.deviceId)), ...maintenanceAlerts(deviceList)].sort((a,b) => b.updatedAt-a.updatedAt),
     maintenance: rows(data.maintenance).filter(m => ids.has(m.deviceId)).sort((a,b) => a.dueDate.localeCompare(b.dueDate)),
     audit: ['super_admin','operations'].includes(access.role) ? rows(data.audit).filter(a => inScope(access, a.branchId)).sort((a,b) => b.at-a.at).slice(0,100) : [],
     users, settings: { offlineSeconds: data.settings?.offlineSeconds || 120 }, updatedAt: Date.now(),
     supportCount: ['super_admin','operations','technician'].includes(access.role) ? rows(support).filter(t => t.status === 'new' && inScope(access,t.branchId)).length : 0 };
 }
+export function subscribeAdminUpdates(onChange: () => void, onError: (error: Error) => void) {
+  const unsubscribers = ['devices', 'admin/operations', 'support'].map(path =>
+    onValue(ref(database, path), onChange, onError));
+  return () => unsubscribers.forEach(unsubscribe => unsubscribe());
+}
 export async function directMutate(action: string, target: string, value: unknown, revoke = false) {
   const access = await directAccess(); const id = validateKey(target); const v = value as Input;
   check(v && typeof v === 'object', 'Dữ liệu không hợp lệ.');
   const permitted = action === 'device' || action === 'branch' ? ['super_admin','operations'] : action === 'alert' || action === 'maintenance' ? ['super_admin','operations','technician'] : ['super_admin'];
-  permit(access, permitted);
+  check(permitted.includes(access.role), 'Không có quyền thực hiện thao tác này.');
   const ops = await read<Ops>('admin/operations') || {};
   const updates: Record<string, unknown> = {};
   let path = '', before: unknown = null, after: unknown = null, branchId = '';
@@ -85,6 +90,7 @@ export async function directMutate(action: string, target: string, value: unknow
     path = 'admin/operations/devices/' + id; before = ops.devices?.[id];
     after = { name: text(v,'name',true), branchId, note: text(v,'note') };
     updates['devices/' + id + '/branchId'] = branchId;
+    updates['devices/' + id + '/name'] = text(v,'name',true);
   } else if (action === 'alert' || action === 'maintenance') {
     const previous = action === 'alert' ? ops.alerts?.[id] : ops.maintenance?.[id];
     const deviceId = action === 'alert' ? (previous as AdminAlert | undefined)?.deviceId : validateKey(text(v,'deviceId',true));
@@ -141,7 +147,7 @@ async function assignCard(v: Input) {
     state.accounts[found.uid].card[cardUid] = true;
     state.cards[cardUid] = {...card,ownerAuthUid:found.uid,branchId};
     return state;
-  });
+  }, { applyLocally: false });
   check(result.committed,'Không liên kết được thẻ.'); return {ok:true};
 }
 async function cashTopUp(v: Input) {
@@ -215,7 +221,7 @@ async function replySupport(v: Input) {
 }
 type RawTransaction = Transaction & { branchId?:string; paymentMethod?:string; status?:string; durationSeconds?:number };
 export async function transactionEntries(): Promise<LedgerEntry[]> {
-  const access=await directAccess(); permit(access,['super_admin','accountant','viewer']);
+  const access=await directAccess(); check(['super_admin','accountant','viewer'].includes(access.role), 'Không có quyền xem giao dịch.');
   const [transactions,cards,devices] = await Promise.all([read<Record<string,RawTransaction>>('transactions'),read<Record<string,RawCard>>('cards'),read<Record<string,RawDevice>>('devices')]);
   return rows(transactions).flatMap(t=>{
     const branchId=t.branchId || (t.deviceId ? devices?.[t.deviceId]?.branchId : '') || (t.uid ? cards?.[t.uid]?.branchId : '') || '';

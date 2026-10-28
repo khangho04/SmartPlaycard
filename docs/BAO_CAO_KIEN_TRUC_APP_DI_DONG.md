@@ -12,10 +12,10 @@ SmartPlaycard quản lý thẻ RFID, số dư và việc sử dụng máy trò c
 
 | Thành phần | Phiên bản khai báo | Vai trò |
 | --- | --- | --- |
-| Expo | `~57.0.25` | Công cụ phát triển và module nền tảng |
-| React Native | `0.86.3` | Giao diện Android/iOS |
-| React | `19.2.3` | Component, hook và Context |
-| Expo Router | `~57.0.23` | Stack, Tabs và route theo tệp |
+| Expo | `^58.0.20` | Công cụ phát triển và module nền tảng |
+| React Native | `0.88.0` | Giao diện Android/iOS |
+| React | `19.3.0` | Component, hook và Context |
+| Expo Router | `~58.0.27` | Stack, Tabs và route theo tệp |
 | TypeScript | `~6.0.3` | Kiểu dữ liệu và kiểm tra mã |
 | Firebase JS SDK | `^12.19.0` | Authentication và Callable Functions |
 | Firebase Admin SDK | `^13.0.0` | Truy cập database từ backend tin cậy |

@@ -42,35 +42,35 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Trang chủ',
-          tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} />,
+          tabBarIcon: ({ focused, size }) => <Ionicons name="home" size={size} color={focused ? Brand.primary : theme.textSecondary} />,
         }}
       />
       <Tabs.Screen
         name="topup"
         options={{
           title: 'Nạp tiền',
-          tabBarIcon: ({ color, size }) => <Ionicons name="add-circle" size={size} color={color} />,
+          tabBarIcon: ({ focused, size }) => <Ionicons name="add-circle" size={size} color={focused ? Brand.primary : theme.textSecondary} />,
         }}
       />
       <Tabs.Screen
         name="history"
         options={{
           title: 'Lịch sử',
-          tabBarIcon: ({ color, size }) => <Ionicons name="time" size={size} color={color} />,
+          tabBarIcon: ({ focused, size }) => <Ionicons name="time" size={size} color={focused ? Brand.primary : theme.textSecondary} />,
         }}
       />
       <Tabs.Screen
         name="card"
         options={{
           title: 'Thẻ RFID',
-          tabBarIcon: ({ color, size }) => <Ionicons name="card" size={size} color={color} />,
+          tabBarIcon: ({ focused, size }) => <Ionicons name="card" size={size} color={focused ? Brand.primary : theme.textSecondary} />,
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Cá nhân',
-          tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} />,
+          tabBarIcon: ({ focused, size }) => <Ionicons name="person" size={size} color={focused ? Brand.primary : theme.textSecondary} />,
         }}
       />
     </Tabs>

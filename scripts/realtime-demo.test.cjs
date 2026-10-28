@@ -43,8 +43,40 @@ function fixture(initial={}) {
   }
   const auth=load('src/services/firebase/rtdb-auth.ts');
   const admin=load('src/services/firebase/direct-admin.ts');
-  return {get state(){return state;},storage,auth,admin,notify,reads,queryError:e=>{queryError=e;},fail:p=>{failPath=p;}};
+  return {get state(){return state;},storage,auth,admin,model:load('src/services/admin/model.ts'),notify,reads,queryError:e=>{queryError=e;},fail:p=>{failPath=p;}};
 }
+
+test('maintenance follows live firmware state, not old admin metadata, and clears notices on exit',async()=>{
+  const now=Date.now(),epoch=Math.floor(now/1000);
+  const f=fixture({devices:{D1:{name:'Machine',branchId:'B1',status:'online',mode:'game',lastSeenEpoch:epoch},D2:{name:'Other',branchId:'B2',status:'maintenance'}},admin:{operations:{devices:{D1:{name:'Display name',status:'online',mode:'game',lastSeenEpoch:1}},branches:{B1:{name:'One'}},alerts:{manual:{deviceId:'D1',title:'Manual',updatedAt:1}},maintenance:{planned:{deviceId:'D1',dueDate:'2026-10-28',completed:false}}}}});
+  await f.auth.registerDatabase('operator','123456');
+  Object.assign(f.state.accounts.operator,{access:'admin',adminRole:'operations',branchId:'B1'});
+  await f.auth.loginDatabase('operator','123456');
+  let changes=0;const stop=f.admin.subscribeAdminUpdates(()=>changes++,e=>{throw e;});
+  const initialChanges=changes;
+  Object.assign(f.state.devices.D1,{status:'maintenance',mode:'maintenance',statusUpdatedAtEpoch:epoch});f.notify();
+  assert.ok(changes>initialChanges);
+  let snapshot=await f.admin.directSnapshot();
+  assert.equal(snapshot.devices.length,1);
+  assert.equal(snapshot.devices[0].name,'Display name');
+  assert.equal(f.model.deviceState(snapshot.devices[0],now,120),'maintenance');
+  assert.equal(snapshot.alerts.filter(a=>a.source==='device').length,1);
+  assert.equal(snapshot.alerts.find(a=>a.source==='device').deviceId,'D1');
+  assert.equal(f.model.isMaintenance(snapshot.devices[0]),true);
+  assert.equal(f.model.deviceState({...snapshot.devices[0],lastSeenEpoch:0},now,120),'maintenance');
+  assert.equal(f.model.deviceState({...snapshot.devices[0],lastSeenEpoch:epoch-121},now,120),'offline');
+  assert.equal(f.model.deviceState({...snapshot.devices[0],status:'online',mode:'maintenance'},now,120),'maintenance');
+  snapshot=await f.admin.directSnapshot();
+  assert.equal(snapshot.alerts.filter(a=>a.source==='device').length,1,'refresh must not duplicate notices');
+  Object.assign(f.state.devices.D1,{status:'online',mode:'menu'});f.notify();
+  snapshot=await f.admin.directSnapshot();
+  assert.equal(f.model.deviceState(snapshot.devices[0],now,120),'online');
+  assert.equal(snapshot.alerts.filter(a=>a.source==='device').length,0);
+  assert.equal(snapshot.alerts[0].id,'manual');
+  assert.equal(snapshot.maintenance[0].id,'planned','exiting maintenance preserves scheduled work');
+  stop();const stoppedChanges=changes;f.notify();assert.equal(changes,stoppedChanges);
+  await f.auth.logoutDatabase();
+});
 test('missing username index falls back to direct accounts read and admin still logs in',async()=>{
   const f=fixture({accounts:{legacy:{username:'someone',access:'user'}}});
   f.queryError(Error('Index not defined, add ".indexOn": "username", for path "/accounts", to the rules'));
@@ -203,9 +235,36 @@ test('RTDB card assignment updates both account links and preserves balance',asy
   const f=fixture({accounts:{old:{username:'old',card:{AABBCCDD:true},access:'user'}},cards:{AABBCCDD:{balance:12000,ownerAuthUid:'old',branchId:'B1'}},admin:{operations:{branches:{B1:{name:'One'}}}}});
   await f.auth.loginDatabase('admin','123456');await f.auth.changeDatabasePassword(null,'new-password-123');await f.auth.registerDatabase('alice','password-123');await f.auth.loginDatabase('admin','new-password-123');
   await f.admin.directCall('adminCardAssign',{cardUid:'AABBCCDD',email:'alice',branchId:'B1'});
+  assert.equal(f.auth.auth.currentUser?.uid,'admin','card assignment must preserve the admin session');
   assert.equal(f.state.cards.AABBCCDD.balance,12000);assert.equal(f.state.cards.AABBCCDD.ownerAuthUid,'alice');
   assert.equal(f.state.accounts.old.card.AABBCCDD,undefined);assert.equal(f.state.accounts.alice.card.AABBCCDD,true);
   assert.equal(f.state.accounts.alice.access,'user');
+  await f.auth.logoutDatabase();
+});
+
+test('branch admins can operate in their branch and finance sees only scoped transactions',async()=>{
+  const f=fixture({devices:{D1:{name:'One',branchId:'B1'},D2:{name:'Two',branchId:'B2'}},admin:{operations:{branches:{B1:{name:'One'},B2:{name:'Two'}},alerts:{A1:{deviceId:'D1',status:'new'},A2:{deviceId:'D2',status:'new'}}}},transactions:{T1:{type:'TOPUP',amount:1000,timestamp:1800000000,branchId:'B1'},T2:{type:'TOPUP',amount:9000,timestamp:1800000000,branchId:'B2'}}});
+  await f.auth.registerDatabase('staff','123456');
+  Object.assign(f.state.accounts.staff,{access:'admin',adminRole:'operations',branchId:'B1'});
+  await f.auth.loginDatabase('staff','123456');
+  await f.admin.directMutate('branch','B1',{name:'Updated',address:'',manager:''});
+  await f.admin.directMutate('device','D1',{name:'Renamed',branchId:'B1',note:''});
+  assert.equal((await f.admin.directPlatformSnapshot()).devices[0].name,'Renamed');
+  await f.admin.directMutate('maintenance','M1',{deviceId:'D1',dueDate:'2026-10-28',assignee:'Staff',note:'Check',cost:100,completed:false});
+  await f.admin.directMutate('alert','A1',{status:'resolved',assignee:'Staff',note:'Fixed'});
+  for(const [action,id,value] of [
+    ['branch','B2',{name:'Forbidden',address:'',manager:''}],
+    ['device','D2',{name:'Forbidden',branchId:'B1',note:''}],
+    ['maintenance','M1',{deviceId:'D2',dueDate:'2026-10-28',assignee:'',note:'',cost:0,completed:false}],
+    ['alert','A2',{status:'resolved',assignee:'',note:''}],
+  ]) await assert.rejects(f.admin.directMutate(action,id,value),/ngoài phạm vi/);
+  f.state.accounts.staff.adminRole='technician';
+  await f.admin.directMutate('maintenance','M1',{deviceId:'D1',dueDate:'2026-10-28',assignee:'Staff',note:'Done',cost:100,completed:true});
+  await assert.rejects(f.admin.directMutate('device','D1',{name:'Denied',branchId:'B1',note:''}),/Không có quyền/);
+  f.state.accounts.staff.adminRole='accountant';
+  assert.deepEqual((await f.admin.directLedger()).rows.map(r=>r.id),['T1']);
+  assert.equal((await f.admin.directReport('2027-01-15','2027-01-15','B1','')).days[0].gross,1000);
+  await assert.rejects(f.admin.directReport('2027-01-15','2027-01-15','B2',''),/Ngoài phạm vi/);
   await f.auth.logoutDatabase();
 });
 test('RTDB games enforce app branch scope and synchronize device configuration without Functions',async()=>{

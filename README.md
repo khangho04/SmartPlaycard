@@ -1,6 +1,8 @@
 # SmartPlaycard
 
-Ứng dụng Expo SDK 57 quản lý thẻ RFID và máy trò chơi. App hiện dùng **Realtime Database trực tiếp cho bản demo/nội bộ**, gồm đăng nhập và mọi tác vụ Admin/User; không dùng Firebase Authentication, Cloud Functions hoặc Admin credentials.
+Ứng dụng Expo SDK 58 quản lý thẻ RFID và máy trò chơi. App hiện dùng **Realtime Database trực tiếp cho bản demo/nội bộ**, gồm đăng nhập và mọi tác vụ Admin/User; không dùng Firebase Authentication, Cloud Functions hoặc Admin credentials.
+
+Yêu cầu Node.js 22.13+ (nhánh 22) hoặc 24.3+ (nhánh 24), và Expo Go hỗ trợ SDK 58 trên điện thoại. Sau khi nâng SDK, khởi động lại bằng `npx expo start --clear` rồi quét mã QR mới.
 
 ```powershell
 npm ci

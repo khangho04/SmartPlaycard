@@ -1,5 +1,6 @@
 import { directCall } from '../firebase/direct-admin';
 import type { AdminReport, AdminSnapshot, LedgerEntry } from "./model";
+export { subscribeAdminUpdates } from '../firebase/direct-admin';
 
 export async function adminCall<T>(
   name: string,

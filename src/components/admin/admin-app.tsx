@@ -33,6 +33,7 @@ import {
   loadLedger,
   loadReport,
   saveAdmin,
+  subscribeAdminUpdates,
 } from "@/services/admin/service";
 import PlatformAdminPanel from "./platform-admin-panel";
 import {
@@ -41,6 +42,7 @@ import {
   dateKey,
   deviceState,
   growth,
+  isMaintenance,
   money,
   rangeFor,
   roles,
@@ -365,6 +367,11 @@ function AdminContent({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh();
+    let pending: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = user ? subscribeAdminUpdates(() => {
+      clearTimeout(pending);
+      pending = setTimeout(() => { setNow(Date.now()); void refresh(); }, 100);
+    }, (e) => setError(adminError(e))) : () => {};
     const requestToken = dataRequest;
     const timer = setInterval(() => {
       setNow(Date.now());
@@ -372,9 +379,11 @@ function AdminContent({
     }, 30000);
     return () => {
       clearInterval(timer);
+      clearTimeout(pending);
+      unsubscribe();
       requestToken.current++;
     };
-  }, [refresh]);
+  }, [refresh, user]);
   const canFinance =
     !!data &&
     ["super_admin", "accountant", "viewer"].includes(data.access.role);
@@ -449,6 +458,7 @@ function AdminContent({
   }, [tab, canFinance, readLedger]);
   const setBranch = (value: string) => {
     changeBranch(value);
+    changeDevice("");
     setPage(0);
   };
   const setDevice = (value: string) => {
@@ -483,7 +493,7 @@ function AdminContent({
       matching(`${d.id} ${d.name}`) &&
       (status === "all" ||
         (status === "connected"
-          ? ["online", "playing", "error"].includes(state)
+          ? ["online", "playing", "maintenance", "error"].includes(state)
           : state === status))
     );
   });
@@ -673,7 +683,7 @@ function AdminContent({
             tone={
               state === "error"
                 ? "bad"
-                : state === "offline" || state === "unknown"
+                : state === "offline" || state === "unknown" || state === "maintenance"
                   ? "warn"
                   : "good"
             }
@@ -904,6 +914,9 @@ function AdminContent({
           {t.id === "alerts" && unresolved.length > 0 && (
             <Badge title={String(unresolved.length)} tone="bad" />
           )}
+          {t.id === "maintenance" && deviceList.some(isMaintenance) && (
+            <Badge title={String(deviceList.filter(isMaintenance).length)} tone="warn" />
+          )}
           {t.id === 'platform' && !!data?.supportCount && <Badge title={String(data.supportCount)} tone="bad" />}
         </Pressable>
       ))}
@@ -1119,7 +1132,7 @@ function AdminContent({
                       {metricCard(
                         "Thiết bị online",
                         String(counts.online + counts.playing + counts.error),
-                        `${counts.playing} đang sử dụng · ${counts.offline} offline`,
+                        `${counts.playing} đang sử dụng · ${counts.maintenance} bảo trì · ${counts.offline} offline`,
                         "pulse-outline",
                         () => {
                           navigate("devices");
@@ -1181,7 +1194,7 @@ function AdminContent({
                               <View style={s.grow}>
                                 <Label bold>{a.title}</Label>
                                 <Label muted size={12}>
-                                  {a.deviceId} · {time(a.updatedAt)}
+                                  {a.deviceId} · {a.updatedAt > 0 ? time(a.updatedAt) : "Chưa đồng bộ thời gian"}
                                 </Label>
                               </View>
                               <Badge
@@ -1279,7 +1292,7 @@ function AdminContent({
                                 <Label bold>{a.title}</Label>
                                 <Label muted size={12}>
                                   {a.deviceId} · {a.count} lần ·{" "}
-                                  {time(a.updatedAt)}
+                                  {a.updatedAt > 0 ? time(a.updatedAt) : "Chưa đồng bộ thời gian"}
                                 </Label>
                                 <Label muted size={12}>
                                   {a.assignee || "Chưa phân công"}
@@ -1288,7 +1301,7 @@ function AdminContent({
                               </View>
                               <View style={{ gap: 8 }}>
                                 <Badge title={alertStatuses[a.status]} />
-                                {canOperate && (
+                                {canOperate && a.source !== 'device' && (
                                   <Button
                                     title="Xử lý"
                                     onPress={() =>
@@ -1722,6 +1735,16 @@ function AdminContent({
                 )}
                 {tab === "maintenance" && (
                   <Panel title="Lịch bảo trì">
+                    {deviceList.filter(isMaintenance).map(d => (
+                      <View key={`live-${d.id}`} style={[s.banner, { backgroundColor: c.soft }]}>
+                        <View style={s.grow}>
+                          <Label bold>{d.name || d.id} · Đang ở chế độ bảo trì</Label>
+                          <Label muted>{d.id} · Máy tạm ngừng phục vụ. Trạng thái cập nhật từ thiết bị.</Label>
+                        </View>
+                        <Badge title={states[deviceState(d, now, data.settings.offlineSeconds)]} tone="warn" />
+                        {canOperate && <Button title="Lên lịch xử lý" onPress={() => openMaintenance(undefined, d.id)} />}
+                      </View>
+                    ))}
                     {canOperate && (
                       <Button
                         title="+ Lên lịch bảo trì"
@@ -1771,7 +1794,7 @@ function AdminContent({
                     {empty(
                       data.maintenance.filter((m) =>
                         deviceList.some((d) => d.id === m.deviceId),
-                      ).length,
+                      ).length + deviceList.filter(isMaintenance).length,
                     )}
                   </Panel>
                 )}
@@ -2000,7 +2023,7 @@ function AdminContent({
     </SafeAreaView>
   );
 
-  function openMaintenance(m?: AdminSnapshot["maintenance"][number]) {
+  function openMaintenance(m?: AdminSnapshot["maintenance"][number], deviceId?: string) {
     openEditor(
       m ? "Cập nhật bảo trì" : "Lên lịch bảo trì",
       "maintenance",
@@ -2021,7 +2044,7 @@ function AdminContent({
         },
       ],
       {
-        deviceId: m?.deviceId ?? data?.devices[0]?.id ?? "",
+        deviceId: m?.deviceId ?? deviceId ?? data?.devices[0]?.id ?? "",
         dueDate: m?.dueDate ?? dateKey(),
         assignee: m?.assignee ?? "",
         note: m?.note ?? "",

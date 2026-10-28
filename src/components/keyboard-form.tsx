@@ -1,7 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import {
   Keyboard, KeyboardAvoidingView, Platform, ScrollView, TextInput,
-  type ScrollViewProps, type StyleProp, type ViewStyle,
+  type ScrollViewInstance, type ScrollViewProps, type StyleProp, type ViewStyle,
 } from 'react-native';
 
 /** Resize the form viewport, including forms hosted in a native Modal. */
@@ -16,7 +16,7 @@ export function KeyboardForm({ children, style }: { children: ReactNode; style?:
 
 /** Keep the focused input visible after keyboard/layout changes and between fields. */
 export function FormScrollView({ onFocus, onBlur, onLayout, onScroll, ...props }: ScrollViewProps) {
-  const scroll = useRef<ScrollView>(null);
+  const scroll = useRef<ScrollViewInstance>(null);
   const offset = useRef(0);
   const focused = useRef<ReturnType<typeof TextInput.State.currentlyFocusedInput> | null>(null);
   const frame = useRef<number | null>(null);

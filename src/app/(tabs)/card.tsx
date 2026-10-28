@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRef, useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, Text, TextInput, View, type TextInputInstance } from 'react-native';
 import { FormScrollView } from '@/components/keyboard-form';
 
 import { AnimatedPressable } from '@/components/animated-pressable';
@@ -16,7 +16,7 @@ import { errorText } from '@/services/service-error';
 export default function CardScreen() {
   const theme = useTheme();
   const { wallet, uid, card, selectCard, data } = useWallet();
-  const uidInput = useRef<TextInput>(null);
+  const uidInput = useRef<TextInputInstance>(null);
   const [inputUid, setInputUid] = useState('');
   const [selecting, setSelecting] = useState(false);
   const [selectionMessage, setSelectionMessage] = useState('');

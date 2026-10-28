@@ -4,7 +4,7 @@ Toàn bộ app dùng Firebase Realtime Database trực tiếp: đăng nhập, đ
 
 ## Sử dụng
 
-1. Chạy `npm install`, rồi `npm start`. Nếu dùng bản native đã build trước khi thêm expo-crypto, build lại hoặc dùng Expo Go tương thích SDK 57.
+1. Chạy `npm install`, rồi `npm start`. Nếu dùng bản native đã build trước khi thêm expo-crypto, build lại hoặc dùng Expo Go tương thích SDK 58.
 2. Trong Firebase Console → Realtime Database → Rules, dán nội dung `admin-backend/database.rules.json` rồi Publish. Rules hiện cho phép đọc/ghi công khai theo yêu cầu dùng demo; các index vẫn giữ để tìm tài khoản và giao dịch.
 3. Đăng nhập `admin` / `123456`. App tạo `accounts/admin` nếu chưa có, hoặc bổ sung credential cho bản ghi admin cũ chưa có mật khẩu RTDB; không ghi đè mật khẩu đã đổi. Nếu cần khởi tạo từ terminal, chạy `node scripts/demo-bootstrap.cjs`.
 4. Đặt mật khẩu mới ít nhất 6 ký tự bất kỳ, nhập lại để xác nhận. App lưu hash mới trong RTDB rồi đăng xuất; đăng nhập lại bằng mật khẩu mới.

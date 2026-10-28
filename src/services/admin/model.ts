@@ -1,7 +1,7 @@
 export type AdminRole =
   "super_admin" | "operations" | "accountant" | "technician" | "viewer";
 export type DeviceState =
-  "online" | "playing" | "offline" | "error" | "unknown";
+  "online" | "playing" | "maintenance" | "offline" | "error" | "unknown";
 export type AlertStatus = "new" | "acknowledged" | "working" | "resolved";
 export interface AdminDevice {
   id: string;
@@ -9,6 +9,8 @@ export interface AdminDevice {
   branchId: string;
   lastSeenEpoch?: number;
   status?: string;
+  mode?: string;
+  statusUpdatedAtEpoch?: number;
   playing?: boolean;
   firmware?: string;
   ipAddress?: string;
@@ -16,6 +18,7 @@ export interface AdminDevice {
   note?: string;
 }
 export interface AdminAlert {
+  source?: 'device';
   id: string;
   deviceId: string;
   title: string;
@@ -114,6 +117,7 @@ export const roles: Record<AdminRole, string> = {
 export const states: Record<DeviceState, string> = {
   online: "Sẵn sàng",
   playing: "Đang sử dụng",
+  maintenance: "Đang bảo trì",
   offline: "Offline",
   error: "Có lỗi",
   unknown: "Chưa đồng bộ",
@@ -145,14 +149,32 @@ export function deviceState(
   offlineSeconds: number,
 ): DeviceState {
   const seen = device.lastSeenEpoch;
+  if ((seen && Number.isFinite(seen) && seen * 1000 <= now + 60000 &&
+      now - seen * 1000 > offlineSeconds * 1000) || device.status === "offline")
+    return "offline";
+  if (isMaintenance(device)) return "maintenance";
   if (!seen || !Number.isFinite(seen) || seen * 1000 > now + 60000)
     return "unknown";
-  if (now - seen * 1000 > offlineSeconds * 1000 || device.status === "offline")
-    return "offline";
   if (device.status === "error") return "error";
   return device.playing === true || device.status === "playing"
     ? "playing"
     : "online";
+}
+export function isMaintenance(device: AdminDevice) {
+  return device.status === 'maintenance' || device.mode === 'maintenance';
+}
+/** Current device notices follow firmware state; scheduled work remains separate. */
+export function maintenanceAlerts(devices: AdminDevice[]): AdminAlert[] {
+  return devices.filter(isMaintenance).map(device => {
+    const at = Number(device.statusUpdatedAtEpoch) * 1000;
+    return {
+      id: `device-maintenance-${device.id}`, source: 'device', deviceId: device.id,
+      title: `${device.name || device.id} đang ở chế độ bảo trì`, severity: 'warning',
+      status: 'working', count: 1, createdAt: Number.isFinite(at) && at > 0 ? at : 0,
+      updatedAt: Number.isFinite(at) && at > 0 ? at : 0, assignee: '',
+      note: 'Máy tạm ngừng phục vụ. Thông báo tự cập nhật khi thiết bị thoát chế độ bảo trì.',
+    };
+  });
 }
 export function dateKey(now = Date.now()) {
   return new Date(now + 7 * 3600000).toISOString().slice(0, 10);

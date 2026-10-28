@@ -46,7 +46,20 @@ export default function PlatformAdminPanel({ colors }: { colors: { text: string;
   }
   async function cash() {
     if (!cashConfirmed) return;
-    cashIntent.current ||= { id: `cash-${Date.now()}-${Math.random().toString(36).slice(2)}`, cardUid, branchId, amount: Number(cashAmount), reference: cashReference };
+    if (!cashIntent.current) {
+      const amount = Number(cashAmount);
+      if (!Number.isSafeInteger(amount) || amount < 1 || amount > 5000000) {
+        setMessage('Số tiền phải là số nguyên từ 1 đến 5.000.000 VND.'); return;
+      }
+      const card = data?.cards.find((c) => c.id === cardUid.trim());
+      if (!card || !card.active || card.branchId !== branchId.trim()) {
+        setMessage('Chọn thẻ đang hoạt động và đúng chi nhánh trước khi nạp tiền.'); return;
+      }
+      if (!cashReference.trim() || cashReference.trim().length > 120) {
+        setMessage('Số biên nhận phải có từ 1 đến 120 ký tự.'); return;
+      }
+    }
+    cashIntent.current ||= { id: `cash-${Date.now()}-${Math.random().toString(36).slice(2)}`, cardUid: cardUid.trim(), branchId: branchId.trim(), amount: Number(cashAmount), reference: cashReference.trim() };
     setCashPending(true);
     if (await mutate('adminCashTopUp', cashIntent.current)) { cashIntent.current = null; setCashPending(false); setCashConfirmed(false); setCashAmount(''); setCashReference(''); }
   }
